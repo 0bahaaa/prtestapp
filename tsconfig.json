@@ -22,7 +22,10 @@
 
     /* Recommended Options */
     "isolatedModules": true,
-    "skipLibCheck": true
+    "skipLibCheck": true,
+
+    /* Fix for default imports like 'path' */
+    "esModuleInterop": true
   },
   "include": ["src"],
   "exclude": ["node_modules", "dist"]
