@@ -20,7 +20,7 @@ jobs:
       - name: Create temporary PR database
         id: create_db
         run: |
-          RESPONSE=$(curl -s -X POST http://localhost:8000/api/v1/databases/postgresql \
+          RESPONSE=$(curl -s -X POST http://host.docker.internal:8000/api/v1/databases/postgresql \
             -H "Authorization: Bearer $COOLIFY_API_TOKEN" \
             -H "Content-Type: application/json" \
             -d '{
@@ -38,37 +38,36 @@ jobs:
       - name: Show temporary DB info
         run: |
           echo "Temporary DB UUID: $DB_UUID"
-          echo "Temporary DB URL: postgres://postgres:${{ secrets.DB_PASSWORD }}@localhost:5432/pr_db_${{ github.run_id }}"
+          echo "Temporary DB URL: postgres://postgres:${{ secrets.DB_PASSWORD }}@host.docker.internal:5432/pr_db_${{ github.run_id }}"
 
       - name: Seed temporary database from original
         run: |
-          TEMP_DB_URL="postgres://postgres:${{ secrets.DB_PASSWORD }}@localhost:5432/pr_db_${{ github.run_id }}"
+          TEMP_DB_URL="postgres://postgres:${{ secrets.DB_PASSWORD }}@host.docker.internal:5432/pr_db_${{ github.run_id }}"
           pg_dump $ORIGINAL_DATABASE_URL | psql $TEMP_DB_URL
           echo "Database seeded"
 
       - name: Update app environment to point to PR DB
         run: |
-          curl -s -X PATCH http://localhost:8000/api/v1/applications/$COOLIFY_APP_UUID \
+          curl -s -X PATCH http://host.docker.internal:8000/api/v1/applications/$COOLIFY_APP_UUID \
             -H "Authorization: Bearer $COOLIFY_API_TOKEN" \
             -H "Content-Type: application/json" \
             -d '{
               "environment_name": "production",
               "environment_uuid": "'"$DB_UUID"'",
               "env_vars": {
-                "DATABASE_URL": "postgres://postgres:'"${{ secrets.DB_PASSWORD }}"'@localhost:5432/pr_db_'${{ github.run_id }}'"
+                "DATABASE_URL": "postgres://postgres:'"${{ secrets.DB_PASSWORD }}"'@host.docker.internal:5432/pr_db_'${{ github.run_id }}'"
               }
             }'
           echo "App environment updated"
 
       - name: Run tests
         run: |
-          # Replace this with your actual test command
           npm install
           npm test
 
 #      - name: Delete temporary PR database
 #        if: always()
 #        run: |
-#          curl -s -X DELETE http://localhost:8000/api/v1/databases/$DB_UUID \
+#          curl -s -X DELETE http://host.docker.internal:8000/api/v1/databases/$DB_UUID \
 #            -H "Authorization: Bearer $COOLIFY_API_TOKEN"
 #          echo "Temporary PR DB deleted"
