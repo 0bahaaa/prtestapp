@@ -1,0 +1,69 @@
+name: PR Database Workflow
+
+on:
+  pull_request:
+
+jobs:
+  setup-pr-db:
+    runs-on: ubuntu-latest
+    env:
+      COOLIFY_API_TOKEN: ${{ secrets.COOLIFY_API_TOKEN }}
+      COOLIFY_PROJECT_UUID: ${{ secrets.COOLIFY_PROJECT_UUID }}
+      COOLIFY_SERVER_UUID: ${{ secrets.COOLIFY_SERVER_UUID }}
+      COOLIFY_APP_UUID: ${{ secrets.COOLIFY_APP_UUID }}
+      ORIGINAL_DATABASE_URL: ${{ secrets.ORIGINAL_DATABASE_URL }}
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v3
+
+      - name: Create temporary PR database
+        id: create_db
+        run: |
+          RESPONSE=$(curl -s -X POST http://localhost:8000/api/v1/databases/postgresql \
+            -H "Authorization: Bearer $COOLIFY_API_TOKEN" \
+            -H "Content-Type: application/json" \
+            -d '{
+              "server_uuid": "'"$COOLIFY_SERVER_UUID"'",
+              "project_uuid": "'"$COOLIFY_PROJECT_UUID"'",
+              "name": "pr-db-${{ github.run_id }}",
+              "postgres_user": "postgres",
+              "postgres_password": "'"${{ secrets.DB_PASSWORD }}"'",
+              "postgres_db": "pr_db_${{ github.run_id }}",
+              "instant_deploy": true
+            }')
+          echo "DB_UUID=$(echo $RESPONSE | jq -r '.uuid')" >> $GITHUB_ENV
+          echo "Created PR DB: $DB_UUID"
+
+      - name: Seed temporary database from original
+        run: |
+          TEMP_DB_URL="postgres://postgres:${{ secrets.DB_PASSWORD }}@localhost:5432/pr_db_${{ github.run_id }}"
+          pg_dump $ORIGINAL_DATABASE_URL | psql $TEMP_DB_URL
+          echo "Database seeded"
+
+      - name: Update app environment to point to PR DB
+        run: |
+          curl -s -X PATCH http://localhost:8000/api/v1/applications/$COOLIFY_APP_UUID \
+            -H "Authorization: Bearer $COOLIFY_API_TOKEN" \
+            -H "Content-Type: application/json" \
+            -d '{
+              "environment_name": "production",
+              "environment_uuid": "'"$DB_UUID"'",
+              "env_vars": {
+                "DATABASE_URL": "postgres://postgres:'"${{ secrets.DB_PASSWORD }}"'@localhost:5432/pr_db_'${{ github.run_id }}'"
+              }
+            }'
+          echo "App environment updated"
+
+      - name: Run tests
+        run: |
+          # Replace this with your actual test command
+          npm install
+          npm test
+
+      - name: Delete temporary PR database
+        if: always()
+        run: |
+          curl -s -X DELETE http://localhost:8000/api/v1/databases/$DB_UUID \
+            -H "Authorization: Bearer $COOLIFY_API_TOKEN"
+          echo "Temporary PR DB deleted"
