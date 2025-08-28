@@ -1,27 +1,32 @@
-# Use Node.js
+# 1. Use Node.js 20 Alpine as base
 FROM node:20-alpine
 
-# Set working dir
-WORKDIR /app
+# 2. Set working directory
+WORKDIR /usr/src/app
 
-# Copy package files
+# 3. Copy package.json and package-lock.json
 COPY package*.json ./
 
-# Install dependencies
-RUN npm install --production
+# 4. Install dependencies
+RUN npm install
 
-# Copy all files
+# 5. Copy source code
 COPY . .
 
-# Generate Prisma client
+# 6. Compile TypeScript
+RUN npx tsc
+
+# 7. Generate Prisma client
 RUN npx prisma generate
 
-# Build app
-RUN npm run build
+# 8. Copy views into dist folder
+RUN mkdir -p dist/views
+RUN cp -r src/views/* dist/views/
 
-# Expose port
+# 9. Expose port
 EXPOSE 3000
 
+<<<<<<< HEAD
 <<<<<<< HEAD
 # 10. Start app with migrations
 CMD npx prisma migrate deploy && node dist/index.js
@@ -29,3 +34,7 @@ CMD npx prisma migrate deploy && node dist/index.js
 # Run migrations automatically, then start
 CMD npx prisma migrate deploy && npm run start
 >>>>>>> b2664ce (update Dockerfile to run migrations)
+=======
+# 10. Start app with migrations
+CMD npx prisma migrate deploy && node dist/index.js
+>>>>>>> a88113b (Update workflow and comment out PR DB deletion)
