@@ -35,6 +35,11 @@ jobs:
           echo "DB_UUID=$(echo $RESPONSE | jq -r '.uuid')" >> $GITHUB_ENV
           echo "Created PR DB: $DB_UUID"
 
+      - name: Show temporary DB info
+        run: |
+          echo "Temporary DB UUID: $DB_UUID"
+          echo "Temporary DB URL: postgres://postgres:${{ secrets.DB_PASSWORD }}@localhost:5432/pr_db_${{ github.run_id }}"
+
       - name: Seed temporary database from original
         run: |
           TEMP_DB_URL="postgres://postgres:${{ secrets.DB_PASSWORD }}@localhost:5432/pr_db_${{ github.run_id }}"
@@ -61,9 +66,9 @@ jobs:
           npm install
           npm test
 
-      - name: Delete temporary PR database
-        if: always()
-        run: |
-          curl -s -X DELETE http://localhost:8000/api/v1/databases/$DB_UUID \
-            -H "Authorization: Bearer $COOLIFY_API_TOKEN"
-          echo "Temporary PR DB deleted"
+#      - name: Delete temporary PR database
+#        if: always()
+#        run: |
+#          curl -s -X DELETE http://localhost:8000/api/v1/databases/$DB_UUID \
+#            -H "Authorization: Bearer $COOLIFY_API_TOKEN"
+#          echo "Temporary PR DB deleted"
