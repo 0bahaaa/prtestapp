@@ -26,15 +26,5 @@ RUN cp -r src/views/* dist/views/
 # 9. Expose port
 EXPOSE 3000
 
-<<<<<<< HEAD
-<<<<<<< HEAD
 # 10. Start app with migrations
 CMD npx prisma migrate deploy && node dist/index.js
-=======
-# Run migrations automatically, then start
-CMD npx prisma migrate deploy && npm run start
->>>>>>> b2664ce (update Dockerfile to run migrations)
-=======
-# 10. Start app with migrations
-CMD npx prisma migrate deploy && node dist/index.js
->>>>>>> a88113b (Update workflow and comment out PR DB deletion)
