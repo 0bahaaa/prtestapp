@@ -30,6 +30,7 @@ jobs:
               "postgres_user": "postgres",
               "postgres_password": "'"${{ secrets.DB_PASSWORD }}"'",
               "postgres_db": "pr_db_${{ github.run_id }}",
+              "image": "postgres:17-alpine",
               "instant_deploy": true
             }')
           echo "DB_UUID=$(echo $RESPONSE | jq -r '.uuid')" >> $GITHUB_ENV
