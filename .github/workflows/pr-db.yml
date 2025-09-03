@@ -11,9 +11,11 @@ jobs:
       COOLIFY_PROJECT_UUID: ${{ secrets.COOLIFY_PROJECT_UUID }}
       COOLIFY_SERVER_UUID: ${{ secrets.COOLIFY_SERVER_UUID }}
       COOLIFY_APP_UUID: ${{ secrets.COOLIFY_APP_UUID }}
-      ORIGINAL_DATABASE_URL_HOST: ${{ secrets.ORIGINAL_DATABASE_URL_HOST }}
       DB_PASSWORD: ${{ secrets.DB_PASSWORD }}
       DB_HOST: ${{ secrets.DB_HOST }}
+      DB_PORT: 5432
+      DB_USER: postgres
+      ORIGINAL_DATABASE_URL: ${{ secrets.ORIGINAL_DATABASE_URL }}
 
     steps:
       - name: Checkout code
@@ -30,15 +32,15 @@ jobs:
           echo "Creating PR database in Coolify..."
           JSON_BODY=$(cat <<EOF
           {
-          "server_uuid": "$COOLIFY_SERVER_UUID",
-          "project_uuid": "$COOLIFY_PROJECT_UUID",
-          "environment_name": "production",
-          "name": "pr-db-${GITHUB_RUN_ID}",
-          "postgres_user": "postgres",
-          "postgres_password": "$DB_PASSWORD",
-          "postgres_db": "pr_db_${GITHUB_RUN_ID}",
-          "image": "postgres:17-alpine",
-          "instant_deploy": true
+            "server_uuid": "$COOLIFY_SERVER_UUID",
+            "project_uuid": "$COOLIFY_PROJECT_UUID",
+            "environment_name": "production",
+            "name": "pr-db-${GITHUB_RUN_ID}",
+            "postgres_user": "postgres",
+            "postgres_password": "$DB_PASSWORD",
+            "postgres_db": "pr_db_${GITHUB_RUN_ID}",
+            "image": "postgres:17-alpine",
+            "instant_deploy": true
           }
           EOF
           )
@@ -49,50 +51,60 @@ jobs:
           echo "Raw response: $RESPONSE"
 
           DB_UUID=$(echo "$RESPONSE" | jq -r '.uuid // empty')
-          DB_URL_INTERNAL=$(echo "$RESPONSE" | jq -r '.internal_db_url // empty')
+          DB_URL="postgres://postgres:$DB_PASSWORD@${DB_HOST}:5432/pr_db_${GITHUB_RUN_ID}"
 
-          if [ -z "$DB_UUID" ] || [ -z "$DB_URL_INTERNAL" ]; then
+          if [ -z "$DB_UUID" ]; then
             echo "❌ Failed to create PR database. Check the raw response above."
             exit 1
           fi
 
           echo "DB_UUID=$DB_UUID" >> $GITHUB_ENV
-          echo "DB_URL_INTERNAL=$DB_URL_INTERNAL" >> $GITHUB_ENV
-          echo "DB_URL=postgres://postgres:$DB_PASSWORD@${DB_HOST}:5432/pr_db_${GITHUB_RUN_ID}" >> $GITHUB_ENV
+          echo "DB_URL=$DB_URL" >> $GITHUB_ENV
           echo "✅ PR database created: $DB_UUID"
 
       - name: Show temporary DB info
         run: |
           echo "Temporary DB UUID: $DB_UUID"
           echo "Temporary DB URL: $DB_URL"
-          echo "Internal DB URL for seeding: $DB_URL_INTERNAL"
 
       - name: Seed temporary database from original
+        env:
+          ORIGINAL_DB_HOST: ${{ env.ORIGINAL_DB_HOST }}
+          ORIGINAL_DB_PORT: ${{ env.ORIGINAL_DB_PORT }}
+          ORIGINAL_DB_USER: ${{ env.ORIGINAL_DB_USER }}
+          ORIGINAL_DB_NAME: ${{ env.ORIGINAL_DB_NAME }}
+          ORIGINAL_DB_PASSWORD: ${{ env.ORIGINAL_DB_PASSWORD }}
+          DB_HOST: ${{ env.DB_HOST }}
+          DB_PORT: ${{ env.DB_PORT }}
+          DB_USER: ${{ env.DB_USER }}
+          DB_PASSWORD: ${{ env.DB_PASSWORD }}
+          GITHUB_RUN_ID: ${{ github.run_id }}
+          
         run: |
           echo "Seeding PR database..."
 
-          # Wait for the PR DB to be ready
-          until pg_isready -h "$DB_HOST" -p "$DB_PORT" -U "$DB_USER" >/dev/null 2>&1; do
-            echo "Waiting for PR DB..."
-            sleep 2
-          done
+          # Use the .env values directly
+          export PGPASSWORD="${ORIGINAL_DB_PASSWORD}"
+          echo "Original DB: ${ORIGINAL_DB_USER}@${ORIGINAL_DB_HOST}:${ORIGINAL_DB_PORT}/${ORIGINAL_DB_NAME}"
 
-          # Use PGPASSWORD for original DB
-          export PGPASSWORD="$ORIGINAL_DB_PASSWORD"
+          # Dump the original DB
+          pg_dump -h "${ORIGINAL_DB_HOST}" -p "${ORIGINAL_DB_PORT}" -U "${ORIGINAL_DB_USER}" -d "${ORIGINAL_DB_NAME}" > /tmp/original_dump.sql
+          if [ $? -ne 0 ]; then
+            echo "❌ Failed to dump original DB"
+            exit 1
+          fi
 
-          # pg_dump from original DB
-          pg_dump -h "$ORIGINAL_DB_HOST" -p "$ORIGINAL_DB_PORT" -U "$ORIGINAL_DB_USER" -d "$ORIGINAL_DB_NAME" > /tmp/original_dump.sql
+          echo "✅ Original DB dumped successfully"
 
-          # Use PGPASSWORD for temporary PR DB
-          export PGPASSWORD="$DB_PASSWORD"
+          # Import into the PR DB
+          export PGPASSWORD="${DB_PASSWORD}"
+          psql -h "${DB_HOST}" -p "${DB_PORT}" -U "${DB_USER}" -d "pr_db_${GITHUB_RUN_ID}" -f /tmp/original_dump.sql
+          if [ $? -ne 0 ]; then
+            echo "❌ Failed to restore dump into PR database"
+            exit 1
+          fi
 
-          # Restore dump into PR DB
-          psql -h "$DB_HOST" -p "$DB_PORT" -U "$DB_USER" -d "pr_db_${GITHUB_RUN_ID}" -f /tmp/original_dump.sql
-
-          echo "✅ Database seeded successfully"
-
-
-
+          echo "✅ PR database seeded successfully"
 
 
       - name: Update app environment to point to PR DB
@@ -100,11 +112,11 @@ jobs:
           echo "Updating app environment..."
           JSON_UPDATE=$(cat <<EOF
           {
-          "environment_name": "production",
-          "environment_uuid": "$DB_UUID",
-          "env_vars": {
-          "DATABASE_URL": "$DB_URL"
-          }
+            "environment_name": "production",
+            "environment_uuid": "$DB_UUID",
+            "env_vars": {
+              "DATABASE_URL": "$DB_URL"
+            }
           }
           EOF
           )
@@ -113,10 +125,3 @@ jobs:
             -H "Content-Type: application/json" \
             -d "$JSON_UPDATE"
           echo "✅ App environment updated"
-
-#      - name: Delete temporary PR database
-#        if: always()
-#        run: |
-#          curl -s -X DELETE http://$DB_HOST:8000/api/v1/databases/$DB_UUID \
-#            -H "Authorization: Bearer $COOLIFY_API_TOKEN"
-#          echo "✅ Temporary PR DB deleted"
